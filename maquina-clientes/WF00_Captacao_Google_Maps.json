@@ -1,0 +1,975 @@
+{
+  "name": "Máquina_Clientes_WF00_v9_Supabase",
+  "nodes": [
+    {
+      "id": "c43ff1f8-e51e-408c-86b4-94fcfd403625",
+      "name": "Form Trigger",
+      "webhookId": "935c15d5-80e9-4b52-af02-b5aa72ded872",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [
+        848,
+        768
+      ],
+      "parameters": {
+        "path": "935c15d5-80e9-4b52-af02-b5aa72ded872",
+        "formTitle": "Buscar Leads no Google Maps",
+        "formDescription": "Informe nicho e cidade para buscar leads e salvar no CRM.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "nicho",
+              "placeholder": "Ex.: odontologia, restaurante, estética facial",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "cidade",
+              "placeholder": "Ex.: Santo André, Jundiaí, São Paulo",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "termo_especifico",
+              "placeholder": "Ex.: clínica odontológica, dentista 24h"
+            },
+            {
+              "fieldLabel": "forcar_busca",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Não"
+                  },
+                  {
+                    "option": "Sim"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "59fac0af-b995-46a7-b63d-4745ff5df3ba",
+      "name": "Definir Parametros",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1072,
+        544
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "nicho-padrao",
+              "name": "nicho_padrao",
+              "value": "={{ $json.nicho }}",
+              "type": "string"
+            },
+            {
+              "id": "cidade-padrao",
+              "name": "cidade_padrao",
+              "value": "={{ $json.cidade }}",
+              "type": "string"
+            },
+            {
+              "id": "termo-especifico",
+              "name": "termo_especifico",
+              "value": "={{ $json.termo_especifico || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "query-busca",
+              "name": "query",
+              "value": "={{ (($json.termo_especifico && $json.termo_especifico.trim()) ? $json.termo_especifico : $json.nicho) + ' ' + $json.cidade }}",
+              "type": "string"
+            },
+            {
+              "id": "forcar-nova-busca",
+              "name": "forcar_nova_busca",
+              "value": "={{ $json.forcar_busca === 'Sim' }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "aa111111-1111-1111-1111-111111111111",
+      "name": "Verificar Prospecao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "alwaysOutputData": true,
+      "position": [
+        1296,
+        544
+      ],
+      "parameters": {
+        "url": "=https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/prospeccao_buscas?organization_id=eq.<ORGANIZATION_ID>&nicho_nome=eq.{{ $json.nicho_padrao }}&cidade=eq.{{ $json.cidade_padrao }}&select=*&limit=1",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "bb222222-2222-2222-2222-222222222222",
+      "name": "Checar Resultado Prospecao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        544
+      ],
+      "parameters": {
+        "jsCode": "const all = $input.all();\nconst params = $('Definir Parametros').first().json;\nconst forcar = params.forcar_nova_busca === true;\nconst firstJson = all.length > 0 ? all[0].json : {};\nconst jaExiste = !!(firstJson && firstJson.id);\nconst podeProsseguir = !jaExiste || forcar;\n\nreturn [{\n  json: {\n    ...params,\n    ja_prospectado: jaExiste,\n    pode_prosseguir: podeProsseguir,\n    prospecao_anterior: jaExiste ? firstJson : null\n  }\n}];"
+      }
+    },
+    {
+      "id": "cc333333-3333-3333-3333-333333333333",
+      "name": "Ja Foi Prospectado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        512
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-prosseguir",
+              "leftValue": "={{ $json.pode_prosseguir }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "looseTypeValidation": true
+        }
+      }
+    },
+    {
+      "id": "5ce7c3c9-ecc7-4391-8086-5014f389a890",
+      "name": "Google Places Text Search New",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1968,
+        816
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://places.googleapis.com/v1/places:searchText",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"Content-Type\": \"application/json\",\n  \"X-Goog-FieldMask\": \"places.id,places.displayName,places.formattedAddress\"\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"textQuery\": \"{{ $json.query }}\",\n  \"languageCode\": \"pt-BR\",\n  \"regionCode\": \"BR\",\n  \"maxResultCount\": 20\n}\n",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "rniLk5dhMIXIEVas",
+          "name": "Google Places API Key (OAMG)"
+        }
+      }
+    },
+    {
+      "id": "bd673c99-8e79-4561-95c9-5257f8eac73e",
+      "name": "Google Place Details New",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "alwaysOutputData": false,
+      "position": [
+        2416,
+        816
+      ],
+      "parameters": {
+        "url": "={{ 'https://places.googleapis.com/v1/places/' + $json.place_id }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"X-Goog-FieldMask\": \"id,displayName,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,userRatingCount,rating\"\n}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "rniLk5dhMIXIEVas",
+          "name": "Google Places API Key (OAMG)"
+        }
+      }
+    },
+    {
+      "id": "4084b3e1-8452-416b-a2f6-8628f955addc",
+      "name": "Transformar Resultado em Leads v4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        736
+      ],
+      "parameters": {
+        "jsCode": "function gerarUUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.floor(Math.random() * 16);\n    const v = c === 'x' ? r : (r & 0x3) | 0x8;\n    return v.toString(16);\n  });\n}\n\nconst places = items[0].json.places || [];\n\nconst parametros = $('Definir Parametros').item.json || {};\nconst nicho = parametros.nicho_padrao || '';\nconst cidade = parametros.cidade_padrao || '';\nconst termoEspecifico = parametros.termo_especifico || '';\nconst query = parametros.query || '';\n\nreturn places\n  .map(place => {\n    if (!place.id) return null;\n\n    const idGerado = gerarUUID();\n    const nome = place.displayName?.text || '';\n    const placeId = place.id;\n\n    return {\n      json: {\n        id: idGerado,\n        id_interno: idGerado,\n        nome,\n        negocio: nome,\n        interesse: `${nicho} | ${cidade}`,\n        nicho,\n        cidade,\n        termo_especifico: termoEspecifico,\n        query_busca: query,\n        place_id: placeId,\n        google_place_id: placeId,\n        google_maps_url: `https://www.google.com/maps/place/?q=place_id:${placeId}`,\n        telefone: '',\n        telefone_normalizado: '',\n        instagram: '',\n        origem: 'google_maps',\n        mensagem_inicial: '',\n        status: 'pronto_para_contato',\n        etapa: 'captado',\n        score: '',\n        observacoes: place.formattedAddress || '',\n        data_criacao: new Date().toISOString(),\n        tipo_registro: 'novo'\n      }\n    };\n  })\n  .filter(Boolean);"
+      }
+    },
+    {
+      "id": "33c3c24e-987b-43ca-b98c-66b595a0dd40",
+      "name": "Merge1",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2640,
+        736
+      ],
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "place_id",
+              "field2": "id"
+            }
+          ]
+        },
+        "joinMode": "enrichInput1",
+        "options": {}
+      }
+    },
+    {
+      "id": "37a91cf6-64f1-41bb-bfd1-957dc7f0975b",
+      "name": "Restaurar ID Interno",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        736
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\n\nconst idInterno = j.id_interno || '';\nconst placeId = j.place_id || j.google_place_id || j.id || '';\n\nreturn {\n  json: {\n    ...j,\n    id: idInterno,\n    id_interno: idInterno,\n    place_id: placeId,\n    google_place_id: placeId,\n    google_place_id_details: j.id,\n    google_maps_url:\n      j.google_maps_url ||\n      (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : '')\n  }\n};"
+      }
+    },
+    {
+      "id": "6a7645a9-adc2-46fc-8444-02476a3ea129",
+      "name": "Enriquecer com Telefone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3088,
+        736
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const details = $json || {};\nconst telIntl = details.internationalPhoneNumber || '';\nconst telLocal = details.nationalPhoneNumber || '';\nconst telefone = telIntl || telLocal;\nconst telefoneNormalizado = String(telefone || '').replace(/\\D/g, '');\n\nconst avaliacoes = (details.userRatingCount !== undefined && details.userRatingCount !== null)\n  ? Number(details.userRatingCount)\n  : 0;\n\nconst nota = (details.rating !== undefined && details.rating !== null)\n  ? Number(details.rating)\n  : '';\n\nreturn {\n  json: {\n    ...$json,\n    telefone,\n    telefone_normalizado: telefoneNormalizado,\n    observacoes: details.formattedAddress || $json.observacoes || '',\n    AVALIACOES_GMN: avaliacoes,\n    NOTA_GMN: nota\n  }\n};"
+      }
+    },
+    {
+      "id": "buscar-instagram-wf00",
+      "name": "Buscar Instagram Google",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "position": [
+        3312,
+        736
+      ],
+      "parameters": {
+        "url": "=https://www.google.com/search?q={{ encodeURIComponent($json.nome + ' ' + ($json.cidade || '') + ' instagram') }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"User-Agent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\"Accept-Language\":\"pt-BR,pt;q=0.9\",\"Accept\":\"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\"}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 12000
+        }
+      }
+    },
+    {
+      "id": "extrair-instagram-wf00",
+      "name": "Extrair Instagram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3536,
+        736
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const html = String($json.body || $json.data || '');\nconst lead = $('Enriquecer com Telefone').item.json;\n\nconst blacklist = ['p','reel','stories','explore','accounts','legal','help','about','press','api','privacy','terms','sharedfiles','reels','highlights','tv'];\n\nconst regex = /(?:https?:\\/\\/)?(?:www\\.)?instagram\\.com\\/([A-Za-z0-9._]{3,30})(?:\\/|\\?|\\\"|'|\\\\u0026|&|\\s|$)/gi;\nconst found = [];\nlet match;\nwhile ((match = regex.exec(html)) !== null) {\n  const username = match[1].toLowerCase();\n  if (!blacklist.includes(username)) {\n    found.push('https://www.instagram.com/' + match[1]);\n  }\n}\n\nconst unique = [...new Set(found)];\nconst instagramUrl = unique[0] || 'Perfil_não_encontrado';\n\nreturn { json: { ...lead, instagram: instagramUrl } };"
+      }
+    },
+    {
+      "id": "ad6838f2-8b62-4d90-8a73-730895739052",
+      "name": "Marcar Novos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        736
+      ],
+      "parameters": {
+        "jsCode": "return items.map(item => ({ json: { ...item.json, tipo_registro: 'novo' } }));"
+      }
+    },
+    {
+      "id": "f1fc29c5-a0cf-41b5-94ba-bebe94d83196",
+      "name": "Ler Leads Existentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "alwaysOutputData": true,
+      "position": [
+        2208,
+        1216
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/contacts?organization_id=eq.<ORGANIZATION_ID>&select=place_id:source_metadata-%3E%3Eplace_id&source_metadata-%3E%3Eplace_id=not.is.null&limit=10000",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "688f09ed-c825-4018-b9ca-52ae6f42306d",
+      "name": "Marcar Existentes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        1200
+      ],
+      "parameters": {
+        "jsCode": "return items.map(item => ({ json: { ...item.json, tipo_registro: 'existente' } }));"
+      }
+    },
+    {
+      "id": "15945a84-b006-4e4f-9d3e-1f9a5793c3d6",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3984,
+        832
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "2864b73a-9535-46ea-ac88-a2a739d5415b",
+      "name": "Classificador Blindado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4208,
+        832
+      ],
+      "parameters": {
+        "jsCode": "const existentes = items.filter(i => i.json.tipo_registro === 'existente');\nconst novos = items.filter(i => i.json.tipo_registro === 'novo');\n\nconst idsExistentes = new Set(\n  existentes\n    .map(i => i.json.place_id)\n    .filter(Boolean)\n);\n\nreturn novos.filter(item => {\n  const j = item.json;\n  if (!j.place_id) return false;\n  if (idsExistentes.has(j.place_id)) return false;\n  return true;\n});"
+      }
+    },
+    {
+      "id": "96da7ea6-214b-4c26-9e12-4eba27b2a99f",
+      "name": "Tem Nome?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4432,
+        832
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d84c6175-a77a-4f96-92ce-59b7f229f0b2",
+              "leftValue": "={{ $json.nome || $json.displayName?.text || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "looseTypeValidation": true
+        }
+      }
+    },
+    {
+      "id": "a2b3c4d5-e6f7-8901-bcde-f01234567890",
+      "name": "Preparar Dados Empresa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4656,
+        832
+      ],
+      "parameters": {
+        "jsCode": "const ORG_ID = '<ORGANIZATION_ID>';\nreturn items.map(item => {\n  const j = item.json;\n  const meta = { origem: 'google_maps' };\n  if (j.place_id) meta.place_id = j.place_id;\n  if (j.google_maps_url) meta.google_maps_url = j.google_maps_url;\n  if (j.AVALIACOES_GMN) meta.avaliacoes_gmn = Number(j.AVALIACOES_GMN);\n  if (j.NOTA_GMN !== '' && j.NOTA_GMN !== null && j.NOTA_GMN !== undefined) meta.nota_gmn = Number(j.NOTA_GMN);\n  if (j.cidade) meta.cidade = j.cidade;\n  if (j.nicho) meta.nicho = j.nicho;\n  if (j.instagram && j.instagram !== 'Perfil_não_encontrado') meta.instagram = j.instagram;\n\n  const body = {\n    organization_id: ORG_ID,\n    name: j.nome || '',\n    phone_number: j.telefone_normalizado ? ('+' + j.telefone_normalizado) : null,\n    source: 'prospeccao_gmn',\n    source_metadata: meta,\n    tags: j.nicho ? [j.nicho] : []\n  };\n  return { json: { ...j, _body: JSON.stringify(body) } };\n});"
+      }
+    },
+    {
+      "id": "90586882-72c1-4ea8-905b-e91a02afd608",
+      "name": "Salvar Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueRegularOutput",
+      "position": [
+        4880,
+        832
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/contacts",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json._body }}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "dd444444-4444-4444-4444-444444444444",
+      "name": "Contar Leads Salvos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5552,
+        832
+      ],
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\nconst params = $('Definir Parametros').first().json;\nreturn [{\n  json: {\n    organization_id: '<ORGANIZATION_ID>',\n    nicho_nome: params.nicho_padrao,\n    cidade: params.cidade_padrao,\n    total_leads_captados: allItems.length,\n    ultima_prospecao: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "ee555555-5555-5555-5555-555555555555",
+      "name": "Registrar Prospecao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5776,
+        832
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/prospeccao_buscas?on_conflict=organization_id,nicho_nome,cidade",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"resolution=merge-duplicates,return=minimal\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({organization_id: $json.organization_id, nicho_nome: $json.nicho_nome, cidade: $json.cidade, total_leads_captados: $json.total_leads_captados, ultima_prospecao: $json.ultima_prospecao}) }}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "0de551f3-a293-4a3c-85ef-390d0822e750",
+      "name": "Form Ending",
+      "webhookId": "3ff982c3-fc32-4d3a-8631-0785025c433f",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [
+        5664,
+        576
+      ],
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Você chegou no final da Prospecção!",
+        "options": {}
+      }
+    },
+    {
+      "id": "728cae76-d4be-4fbb-bde5-3f1ae1c062f4",
+      "name": "Registrar Nicho PRospectado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        560
+      ],
+      "parameters": {
+        "jsCode": "return $input.all();"
+      }
+    },
+    {
+      "id": "6ca61ae6-dcc7-4a22-b454-72f9d8ed0658",
+      "name": "Append row in sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueRegularOutput",
+      "position": [
+        2240,
+        576
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF_NICHOS>.supabase.co/rest/v1/nichos?on_conflict=nome",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Authorization\": \"Bearer <SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"resolution=merge-duplicates,return=minimal\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"nome\": \"{{ $json.nicho_padrao }}\"}",
+        "options": {}
+      }
+    },
+    {
+      "id": "e1de7cf2-a118-4f80-ab5c-e69360e9cde5",
+      "name": "Sticky Note2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        736,
+        112
+      ],
+      "parameters": {
+        "content": "CRIADOR DE\nINTERESSE",
+        "height": 224,
+        "width": 1664
+      }
+    },
+    {
+      "id": "204a74e8-cdb5-424e-9534-c6ace92107d1",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        576,
+        -208
+      ],
+      "parameters": {
+        "content": "FIX Master",
+        "height": 288,
+        "width": 976,
+        "color": 3
+      }
+    },
+    {
+      "id": "2c704fa0-6c45-463b-996e-4109dd060a0c",
+      "name": "Preparar Dados Lead CRM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5104,
+        832
+      ],
+      "parameters": {
+        "jsCode": "const ORG_ID = '<ORGANIZATION_ID>';\nconst PIPELINE_ID = '478acf1c-3d77-4a96-af80-4a7a6209cd17';\nconst STAGE_CAPTADO = '75723cca-7cd5-41ee-a911-9dbd1972a861';\n\nconst _todos = items.map((item, idx) => ({ item, idx })).filter(({ item }) => item.json && item.json.id);\nreturn _todos.map(({ item, idx }) => {\n  const contact = item.json;\n  const original = $('Preparar Dados Empresa').all()[idx].json;\n\n  const meta = {};\n  if (original.place_id) meta.place_id = original.place_id;\n  if (original.nicho) meta.nicho = original.nicho;\n  if (original.query_busca) meta.query_busca = original.query_busca;\n\n  const body = {\n    organization_id: ORG_ID,\n    pipeline_id: PIPELINE_ID,\n    stage_id: STAGE_CAPTADO,\n    contact_id: contact.id,\n    title: original.nome || contact.name || '',\n    source: 'prospeccao_gmn',\n    source_metadata: meta,\n    status: 'open'\n  };\n  return { json: { ...original, _lead_body: JSON.stringify(body) } };\n});"
+      }
+    },
+    {
+      "id": "4be14c05-7974-43ae-b7d1-7afe94db4f46",
+      "name": "Salvar Lead CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5328,
+        832
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=minimal\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json._lead_body }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "Definir Parametros",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ler Leads Existentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Definir Parametros": {
+      "main": [
+        [
+          {
+            "node": "Verificar Prospecao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Prospecao": {
+      "main": [
+        [
+          {
+            "node": "Checar Resultado Prospecao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar Resultado Prospecao": {
+      "main": [
+        [
+          {
+            "node": "Ja Foi Prospectado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ja Foi Prospectado?": {
+      "main": [
+        [
+          {
+            "node": "Form Ending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Places Text Search New",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar Nicho PRospectado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Places Text Search New": {
+      "main": [
+        [
+          {
+            "node": "Transformar Resultado em Leads v4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transformar Resultado em Leads v4": {
+      "main": [
+        [
+          {
+            "node": "Google Place Details New",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Place Details New": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Restaurar ID Interno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar ID Interno": {
+      "main": [
+        [
+          {
+            "node": "Enriquecer com Telefone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enriquecer com Telefone": {
+      "main": [
+        [
+          {
+            "node": "Buscar Instagram Google",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Instagram Google": {
+      "main": [
+        [
+          {
+            "node": "Extrair Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Instagram": {
+      "main": [
+        [
+          {
+            "node": "Marcar Novos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Novos": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Leads Existentes": {
+      "main": [
+        [
+          {
+            "node": "Marcar Existentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Existentes": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Classificador Blindado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classificador Blindado": {
+      "main": [
+        [
+          {
+            "node": "Tem Nome?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Nome?": {
+      "main": [
+        [
+          {
+            "node": "Preparar Dados Empresa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Dados Empresa": {
+      "main": [
+        [
+          {
+            "node": "Salvar Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contar Leads Salvos": {
+      "main": [
+        [
+          {
+            "node": "Registrar Prospecao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Prospecao": {
+      "main": [
+        [
+          {
+            "node": "Form Ending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Nicho PRospectado": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Leads": {
+      "main": [
+        [
+          {
+            "node": "Preparar Dados Lead CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Dados Lead CRM": {
+      "main": [
+        [
+          {
+            "node": "Salvar Lead CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Lead CRM": {
+      "main": [
+        [
+          {
+            "node": "Contar Leads Salvos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "exportado_em": "2026-11-11",
+    "n8n_workflow_id": "8VDPo3rv6VZOFkuf",
+    "versao_ativa": "c68e0801-da8c-4823-9438-09e4558ab8d3"
+  }
+}

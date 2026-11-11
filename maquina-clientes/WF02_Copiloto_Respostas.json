@@ -1,0 +1,400 @@
+{
+  "name": "Máquina_Clientes_WF02_Copiloto_Respostas_by_Claude_code_v1",
+  "nodes": [
+    {
+      "id": "4543d3bc-f161-45c7-b10a-5e04dd25553e",
+      "name": "Copiloto - A cada 2 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/2 8-19 * * 1-6"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8589bb49-1ed3-4460-9eab-12603f8a5767",
+      "name": "Buscar Leads em Conversa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "{\"organization_id\": \"eq.<ORGANIZATION_ID>\", \"stage_id\": \"in.(03dea7bf-9c4d-4f22-98b2-0fd7aa27f9f8,4c26d63e-606d-49d9-8daf-fd5c4e8c7f55)\", \"status\": \"eq.open\", \"select\": \"id,contact_id,stage_id,custom_fields,contacts(name,phone_number)\", \"limit\": \"100\"}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "e394cfd0-9f6a-48b8-96bb-1950bccedd24",
+      "name": "Code - Normalizar Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Um item por lead em conversa; pula os que o Hamilton pausou no copiloto (wf02.pausado = true)\n// e os que seguem por outro canal (ex.: wf01.etapa = aguardando_resposta_email)\nconst out = [];\nfor (const item of $input.all()) {\n  const l = item.json || {};\n  if (!l.id) continue;\n  const cf = (l.custom_fields && typeof l.custom_fields === 'object') ? l.custom_fields : {};\n  const wf02 = cf.wf02 || {};\n  const wf01 = cf.wf01 || {};\n  if (wf02.pausado === true) continue;\n  if (/email/i.test(String(wf01.etapa || ''))) continue;\n  const c = l.contacts || {};\n  out.push({ json: {\n    lead_id: l.id,\n    contact_id: l.contact_id,\n    stage_id: l.stage_id,\n    empresa: String(c.name || '').trim(),\n    telefone: String(c.phone_number || '').replace(/\\D/g, ''),\n    wf01,\n    wf02\n  } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "2ba19c98-f356-4e5c-9e26-635db58bc04b",
+      "name": "Buscar Mensagens do Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ contact_id: \"eq.\" + $json.contact_id, select: \"id,contact_id,conversation_id,channel_session_id,direction,type,body,created_at\", order: \"created_at.desc\", limit: \"40\" }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "c60f3b2b-35e7-4b64-b196-d3779eeb9090",
+      "name": "Code - Decidir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Decide quais leads precisam de sugestão agora e monta o pedido para o Claude.\n// modo 'resposta': o lead mandou mensagem e ninguém respondeu ainda.\n// modo 'followup': a última mensagem é nossa e o lead sumiu (1º lembrete em 24h, 2º 48h depois, no máximo 2).\nconst LINK_AGENDA = 'https://calendar.app.google/nTdCMvHLeZo7eLLL8';\nconst MODELO = 'claude-opus-5-5';\nconst MAX_POR_EXECUCAO = 3;\nconst H = 3600 * 1000;\nconst NL = String.fromCharCode(10);\nconst agora = Date.now();\nconst ETAPAS = {\n  '03dea7bf-9c4d-4f22-98b2-0fd7aa27f9f8': 'Em Qualificação',\n  '4c26d63e-606d-49d9-8daf-fd5c4e8c7f55': 'Lead Quente'\n};\nconst fmt = (ts) => new Date(ts).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });\nconst corpo = (m) => {\n  const b = String(m.body || '').trim();\n  if (b) return b;\n  return '[' + (m.type || 'mídia') + ' sem texto]';\n};\n\nconst leads = $('Code - Normalizar Leads').all().map(i => i.json);\nconst msgs = $input.all().map(i => i.json).filter(m => m && m.id && m.contact_id);\n\nconst SYSTEM = [\n  'Você escreve mensagens de WhatsApp em nome do Hamilton, da Agência OnlineAgora, para donos e atendentes de negócios locais (farmácias de manipulação, clínicas, studios, lojas) que já responderam a uma prospecção dele.',\n  '',\n  'O que o Hamilton oferece: automação no WhatsApp do próprio negócio para não perder cliente. Exemplos: quem pediu orçamento e sumiu recebe um retorno automático no tempo certo (no mesmo dia ou no dia seguinte, perguntando se ficou dúvida); lembretes quando algo fica pronto; quem demonstra interesse cai direto para a equipe responder; e o negócio passa a ver quantos orçamentos viraram venda depois do lembrete. Funciona com o processo que eles já têm, só tira a dependência de alguém lembrar.',\n  '',\n  'Objetivo da conversa: marcar uma conversa de 15 minutos com o Hamilton. Link para o lead escolher o horário: ' + LINK_AGENDA,\n  '',\n  'Regras de escrita:',\n  '- Português do Brasil, tom humano, simpático e direto, como o Hamilton escreveria no celular. Nada de linguagem de vendedor ou de robô.',\n  '- Curto: no máximo 3 frases curtas, em até 2 parágrafos. No máximo 1 emoji.',\n  '- Responda primeiro ao que a pessoa disse ou perguntou. Valorize o que ela já faz bem antes de propor algo.',\n  '- Termine com uma pergunta simples ou com o convite para os 15 minutos.',\n  '- Mande o link da agenda quando a pessoa mostrar abertura (confirmou a dor, perguntou como funciona, perguntou preço, pediu proposta). Não mande o link duas vezes seguidas se ele já foi enviado e a pessoa não reagiu a ele; nesse caso ofereça também \"ou me diz um horário que eu encaixo\".',\n  '- Nunca fale preço, prazo ou valores. Se perguntarem, diga que depende do volume e do jeito que eles atendem, e que nos 15 minutos o Hamilton mostra e passa os valores.',\n  '- Nunca invente números, casos de clientes, resultados, integrações ou garantias. Nunca critique o robô, o atendimento ou o processo deles.',\n  '- Não se apresente de novo se o Hamilton já se apresentou na conversa. Não diga que é uma IA.',\n  '',\n  'Quando NÃO sugerir mensagem (acao = \"avisar_hamilton\"): pedido de contrato, proposta formal por escrito, dúvida técnica específica (integração com sistema X, API, LGPD), reclamação, assunto pessoal, pedido para falar por ligação agora, ou qualquer coisa que você não saiba responder com segurança.',\n  'Quando acao = \"nada\": a última mensagem do lead não pede resposta (ex.: só \"ok\", \"👍\", figurinha) e o Hamilton já fez a pergunta ou o convite.',\n  '',\n  'etapa_sugerida: \"agendado\" se o lead disse que marcou ou combinou horário; \"lead_quente\" se pediu preço, proposta ou demonstrou interesse claro; \"descartado\" se disse que não tem interesse; senão \"manter\".',\n  'motivo: uma frase curta, para o Hamilton, explicando a leitura da conversa.'\n].join(NL);\n\nconst out = [];\nfor (const l of leads) {\n  if (out.length >= MAX_POR_EXECUCAO) break;\n  const ms = msgs.filter(m => m.contact_id === l.contact_id)\n    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));\n  if (!ms.length) continue;\n  const wf2 = l.wf02 || {};\n  const last = ms[ms.length - 1];\n  const lastTs = new Date(last.created_at).getTime();\n  const inbounds = ms.filter(m => m.direction === 'inbound');\n  const lastIn = inbounds[inbounds.length - 1];\n  if (!lastIn) continue; // lead nunca respondeu: não é conversa\n  let modo = null;\n  let fu = { anchor: null, count: 0 };\n  if (last.direction === 'inbound') {\n    if (agora - lastTs < 90 * 1000) continue; // espera o lead terminar de digitar\n    if (agora - lastTs > 12 * H) continue;   // resposta velha demais: o Hamilton resolve\n    if (wf2.ultima_inbound_processada === last.id) continue;\n    modo = 'resposta';\n  } else {\n    const count = (wf2.fu_anchor === lastIn.id) ? Number(wf2.fu_count || 0) : 0;\n    if (count >= 2) continue;\n    const ref = count === 0 ? lastTs : Math.max(lastTs, new Date(wf2.fu_ultimo_em || 0).getTime());\n    const espera = count === 0 ? 24 * H : 48 * H;\n    if (agora - ref < espera) continue;\n    if (agora - lastTs > 10 * 24 * H) continue; // conversa parada há mais de 10 dias: não insiste\n    modo = 'followup';\n    fu = { anchor: lastIn.id, count };\n  }\n\n  const historico = ms.slice(-30).map(m => '[' + fmt(m.created_at) + '] ' + (m.direction === 'inbound' ? 'Lead' : 'Hamilton') + ': ' + corpo(m)).join(NL + NL);\n  const linkJaEnviado = ms.some(m => m.direction === 'outbound' && String(m.body || '').includes('calendar.app.google'));\n  let tarefa;\n  if (modo === 'resposta') {\n    tarefa = 'Escreva a próxima mensagem do Hamilton respondendo ao lead.';\n  } else if (fu.count === 0) {\n    tarefa = 'O lead não responde há mais de 24 horas. Escreva o 1º lembrete (follow-up): leve, retomando o último assunto em poucas palavras. ' + (linkJaEnviado ? 'O link da agenda já foi enviado: lembre dele e ofereça também que a pessoa diga um horário que o Hamilton encaixa.' : 'Convide para os 15 minutos com o link da agenda.');\n  } else {\n    tarefa = 'O lead continua sem responder, mesmo depois de um lembrete. Escreva o 2º e último lembrete: bem curto, sem pressão, deixando a porta aberta (ex.: fica à vontade, quando fizer sentido é só me chamar) e repetindo o link da agenda.';\n  }\n  const user = [\n    'Agora: ' + fmt(agora),\n    'Empresa: ' + (l.empresa || '(sem nome)'),\n    'Etapa no CRM: ' + (ETAPAS[l.stage_id] || 'em conversa'),\n    'Link da agenda já enviado nesta conversa: ' + (linkJaEnviado ? 'sim' : 'não'),\n    '',\n    'Conversa no WhatsApp (mais antiga primeiro):',\n    historico,\n    '',\n    'Tarefa: ' + tarefa\n  ].join(NL);\n\n  const body = {\n    model: MODELO,\n    max_tokens: 4000,\n    output_config: {\n      effort: 'medium',\n      format: { type: 'json_schema', schema: {\n        type: 'object',\n        properties: {\n          acao: { type: 'string', enum: ['sugerir', 'avisar_hamilton', 'nada'] },\n          texto: { type: 'string', description: 'A mensagem pronta para enviar ao lead (vazia se acao não for sugerir).' },\n          motivo: { type: 'string' },\n          etapa_sugerida: { type: 'string', enum: ['manter', 'lead_quente', 'agendado', 'descartado'] }\n        },\n        required: ['acao', 'texto', 'motivo', 'etapa_sugerida'],\n        additionalProperties: false\n      } }\n    },\n    fallbacks: 'default',\n    system: SYSTEM,\n    messages: [{ role: 'user', content: user }]\n  };\n\n  let tel = l.telefone;\n  if (tel && !tel.startsWith('55')) tel = '55' + tel;\n  out.push({ json: {\n    lead_id: l.lead_id,\n    contact_id: l.contact_id,\n    empresa: l.empresa,\n    telefone: tel,\n    chatId: tel + '@c.us',\n    conversation_id: last.conversation_id,\n    channel_session_id: (ms.slice().reverse().find(m => m.channel_session_id) || {}).channel_session_id || null,\n    modo,\n    fu_anchor: fu.anchor,\n    fu_count: fu.count,\n    ultima_msg_id: last.id,\n    ultima_msg_em: last.created_at,\n    ultima_do_lead: corpo(lastIn).substring(0, 300),\n    claude_body: JSON.stringify(body)\n  } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "003b5745-8b97-457d-b23a-717ef39d683b",
+      "name": "Claude - Sugerir Resposta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"anthropic-version\": \"2023-06-01\", \"anthropic-beta\": \"server-side-fallback-2026-07-01\", \"content-type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.claude_body }}",
+        "options": {
+          "timeout": 180000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "anthropicApi": {
+          "id": "fWiVAKzrIVBC5GBX",
+          "name": "API key Setembro2026 by HV Anthropic"
+        }
+      }
+    },
+    {
+      "id": "a9792d77-0a50-4653-b737-950772af2e3c",
+      "name": "Ler Lead Atual",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: \"eq.\" + $(\"Code - Decidir\").item.json.lead_id, select: \"id,custom_fields\" }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "6f60e15b-7b9d-429b-887c-2a0739f2888d",
+      "name": "Code - Registrar Sugestão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Lê a resposta do Claude, grava a sugestão pendente (com token de uso único) e marca o lead como processado.\nconst NL = String.fromCharCode(10);\nconst d = $('Code - Decidir').item.json;\nconst r = $('Claude - Sugerir Resposta').item.json || {};\nconst atual = $json || {};\nconst cf = (atual.custom_fields && typeof atual.custom_fields === 'object') ? atual.custom_fields : null;\nif (!cf) return { json: { pular: true, motivo: 'lead_nao_lido' } };\nconst prev = cf.wf02 || {};\nconst agora = new Date().toISOString();\n\nlet s = null;\nlet erro = '';\nif (r.error) erro = 'erro_api: ' + String((r.error && r.error.message) || JSON.stringify(r.error)).substring(0, 200);\nelse if (r.stop_reason === 'refusal') erro = 'recusa_do_modelo';\nelse {\n  const blocos = (r.content || []).filter(b => b.type === 'text');\n  const txt = blocos.length ? blocos[blocos.length - 1].text : '';\n  try { s = JSON.parse(txt); } catch (e) { erro = 'resposta_invalida'; }\n}\nif (s && s.acao === 'sugerir' && !String(s.texto || '').trim()) { s.acao = 'avisar_hamilton'; s.motivo = 'sugestão veio vazia'; }\nconst acao = erro ? 'erro' : s.acao;\n\nconst wf02 = Object.assign({}, prev, { ultima_execucao_em: agora });\nif (d.modo === 'resposta') wf02.ultima_inbound_processada = d.ultima_msg_id;\nelse { wf02.fu_anchor = d.fu_anchor; wf02.fu_count = Number(d.fu_count || 0) + 1; wf02.fu_ultimo_em = agora; }\n\nlet token = '';\nlet link = '';\nif (acao === 'sugerir') {\n  while (token.length < 32) token += Math.random().toString(36).slice(2);\n  token = token.slice(0, 32);\n  wf02.pendente = {\n    token, texto: String(s.texto).trim(), modo: d.modo, fu_n: d.modo === 'followup' ? Number(d.fu_count || 0) + 1 : 0,\n    etapa_sugerida: s.etapa_sugerida, motivo: s.motivo,\n    chatId: d.chatId, telefone: d.telefone, empresa: d.empresa,\n    conversation_id: d.conversation_id, channel_session_id: d.channel_session_id, contact_id: d.contact_id,\n    ultima_msg_em: d.ultima_msg_em, criado_em: agora\n  };\n  link = 'https://webhook.hamiltonviana.com.br/webhook/wf02-copiloto?lead=' + d.lead_id + '&t=' + token;\n}\nconst rotulo = d.modo === 'resposta' ? 'resposta' : ('follow-up ' + (Number(d.fu_count || 0) + 1) + '/2');\nconst nota = '[' + agora + '] WF02 copiloto (' + rotulo + '): ' + (erro ? erro : (acao + ' - ' + (s.motivo || '')));\nwf02.log = ((prev.log || '') + NL + nota).trim().split(NL).slice(-30).join(NL);\nconst novo = Object.assign({}, cf, { wf02 });\n\nconst ETAPA = { manter: 'manter', lead_quente: 'Lead Quente', agendado: 'Agendado', descartado: 'Descartado' };\nconst empresa = d.empresa || d.telefone;\nlet aviso = '';\nif (acao === 'sugerir') {\n  aviso = '💬 Copiloto: ' + empresa + ' (' + rotulo + ')' + NL + NL\n    + (d.modo === 'resposta' ? 'Lead disse: \"' + d.ultima_do_lead + '\"' : 'Sem resposta do lead desde a sua última mensagem.') + NL + NL\n    + 'Sugestão (ainda NÃO enviada):' + NL + NL + String(s.texto).trim() + NL + NL\n    + '👉 Revisar, editar e enviar pelo 2144:' + NL + link + NL + NL\n    + 'Leitura: ' + (s.motivo || '') + (s.etapa_sugerida && s.etapa_sugerida !== 'manter' ? NL + 'Etapa sugerida no CRM: ' + ETAPA[s.etapa_sugerida] : '') + NL\n    + 'Se você responder antes pelo celular, a sugestão é descartada.';\n} else if (acao === 'avisar_hamilton') {\n  aviso = '⚠️ Copiloto: ' + empresa + ' precisa de você' + NL + NL\n    + 'Lead disse: \"' + d.ultima_do_lead + '\"' + NL + NL + 'Por quê: ' + (s.motivo || '') + NL + NL + 'Nenhuma sugestão foi gerada. Responda pelo celular.';\n} else if (acao === 'erro') {\n  aviso = '⚠️ Copiloto: não consegui gerar sugestão para ' + empresa + ' (' + erro + '). Responda pelo celular.';\n}\nreturn { json: { lead_id: d.lead_id, acao, avisar: aviso !== '', aviso, patch_body: JSON.stringify({ custom_fields: novo }) } };\n"
+      }
+    },
+    {
+      "id": "9290d4cc-09b2-4e75-8f67-2ddbf1e3829f",
+      "name": "CRM - Gravar Sugestão",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: \"eq.\" + $json.lead_id }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $(\"Code - Registrar Sugestão\").item.json.patch_body }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "43c20609-fa63-4aa3-aa8b-648cc66846bc",
+      "name": "IF - Avisar Hamilton?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $(\"Code - Registrar Sugestão\").item.json.avisar }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "0a76be0e-bc1d-478f-bdc5-a04efc142ef9",
+      "name": "WAHA - Avisar Hamilton",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: \"<WAHA_SESSION>\", chatId: \"<TELEFONE_HAMILTON>@c.us\", text: $(\"Code - Registrar Sugestão\").item.json.aviso }) }}",
+        "options": {}
+      },
+      "disabled": false,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Copiloto - A cada 2 min": {
+      "main": [
+        [
+          {
+            "node": "Buscar Leads em Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Leads em Conversa": {
+      "main": [
+        [
+          {
+            "node": "Code - Normalizar Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Normalizar Leads": {
+      "main": [
+        [
+          {
+            "node": "Buscar Mensagens do Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Mensagens do Lead": {
+      "main": [
+        [
+          {
+            "node": "Code - Decidir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Decidir": {
+      "main": [
+        [
+          {
+            "node": "Claude - Sugerir Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude - Sugerir Resposta": {
+      "main": [
+        [
+          {
+            "node": "Ler Lead Atual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Lead Atual": {
+      "main": [
+        [
+          {
+            "node": "Code - Registrar Sugestão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Registrar Sugestão": {
+      "main": [
+        [
+          {
+            "node": "CRM - Gravar Sugestão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Gravar Sugestão": {
+      "main": [
+        [
+          {
+            "node": "IF - Avisar Hamilton?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Avisar Hamilton?": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Avisar Hamilton",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "exportado_em": "2026-11-11",
+    "n8n_workflow_id": "XuflkKGTjX3r1uuG",
+    "versao_ativa": "b35d203e-ce0a-42dc-9135-67486f2335ff"
+  }
+}
