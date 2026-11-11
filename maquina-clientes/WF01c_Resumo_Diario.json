@@ -1,0 +1,140 @@
+{
+  "name": "Máquina_Clientes_WF01c_Resumo_Diário_by_Claude_code_v1",
+  "nodes": [
+    {
+      "id": "e1a1b2c3-0001-4d8e-8f4a-dddd00000001",
+      "name": "Resumo - Schedule 18h30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 18 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e1a1b2c3-0002-4d8e-8f4a-dddd00000002",
+      "name": "Resumo - Números do Dia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/rpc/wf01_guarda_diaria",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_channel: \"4bff8eed-ec5c-40c7-a114-614bb28fd1d2\" }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "e1a1b2c3-0003-4d8e-8f4a-dddd00000003",
+      "name": "Resumo - Formatar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const g = $json;\nconst NL = String.fromCharCode(10);\nconst d = String(g.agora_brt || '').slice(0, 10).split('-').reverse().slice(0, 2).join('/');\nconst n = (v) => Number(v || 0);\nlet t = '📊 Resumo da prospecção — ' + d + NL + NL;\nt += 'Enviados hoje: ' + n(g.enviados_hoje) + NL;\nt += 'Respostas de leads (não robô): ' + n(g.respostas_hoje) + NL;\nt += 'Robôs detectados e bloqueados: ' + n(g.robos_hoje) + NL;\nt += 'Sem WhatsApp: ' + n(g.sem_whatsapp_hoje) + NL;\nt += 'Erros de envio: ' + n(g.erros_envio_hoje) + NL;\nt += 'Fila restante: ' + n(g.fila_restante) + ' leads' + NL;\nt += 'Canal: ' + g.canal_status + NL;\nif (n(g.respostas_hoje) > 0) t += NL + '👉 Há resposta de lead esperando você no CRM (Prospecção Fria).';\nif (g.canal_status !== 'WORKING' || n(g.erros_envio_hoje) >= 2) t += NL + '⚠️ Atenção: confira o canal antes do próximo dia.';\nif (n(g.fila_restante) < 15) t += NL + '📌 Fila baixando: hora de rodar o WF00 e captar mais leads.';\nreturn [{ json: { texto: t } }];"
+      }
+    },
+    {
+      "id": "e1a1b2c3-0004-4d8e-8f4a-dddd00000004",
+      "name": "Resumo - Enviar Hamilton (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: \"<WAHA_SESSION>\", chatId: \"<TELEFONE_HAMILTON>@c.us\", text: $json.texto }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Resumo - Schedule 18h30": {
+      "main": [
+        [
+          {
+            "node": "Resumo - Números do Dia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumo - Números do Dia": {
+      "main": [
+        [
+          {
+            "node": "Resumo - Formatar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumo - Formatar": {
+      "main": [
+        [
+          {
+            "node": "Resumo - Enviar Hamilton (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Sao_Paulo",
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "exportado_em": "2026-11-11",
+    "n8n_workflow_id": "uKZ6zRBjAFBRTKPa",
+    "versao_ativa": "ff3d684e-98ed-4916-b7df-89cf4a9a9af5"
+  }
+}

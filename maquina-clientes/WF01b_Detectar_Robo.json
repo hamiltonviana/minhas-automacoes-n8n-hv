@@ -1,0 +1,1156 @@
+{
+  "name": "Máquina_Clientes_WF01b_Detectar_Robô_Pós_Envio_by_Claude_code_v1",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 9-19 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "trigger-robo",
+      "name": "Verificação - Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1600,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ (() => { const now = Date.now(); const min = new Date(now - 30*60000).toISOString(); const max = new Date(now - 60000).toISOString(); return JSON.stringify({ organization_id: 'eq.<ORGANIZATION_ID>', select: 'id,contact_id,custom_fields,contacts(id,name,phone_number)', and: `(custom_fields->wf01->>status.eq.mensagem1_whatsapp_enviado,custom_fields->wf01->>etapa.eq.aguardando_resposta,custom_fields->wf01->>mensagem1_enviada_em.gte.${min},custom_fields->wf01->>mensagem1_enviada_em.lte.${max})`, limit: '20' }); })() }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "id": "buscar-leads-aguardando",
+      "name": "Buscar Leads Aguardando Verificação",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1376,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const l = item.json;\n  const c = l.contacts || {};\n  const wf01 = (l.custom_fields || {}).wf01 || {};\n  return {\n    json: {\n      lead_id: l.id,\n      contact_id: l.contact_id,\n      nome: c.name || '',\n      negocio: c.name || '',\n      telefone_normalizado: String(c.phone_number || '').replace(/\\D/g, ''),\n      mensagem1_enviada_em: wf01.mensagem1_enviada_em || '',\n      _custom_fields_raw: l.custom_fields || {}\n    }\n  };\n});"
+      },
+      "id": "normalizar-leads-robo",
+      "name": "Code - Normalizar Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "maxItems": "=5"
+      },
+      "id": "limitar-lote-robo",
+      "name": "Limitar Lote",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/conversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ organization_id: 'eq.<ORGANIZATION_ID>', contact_id: 'eq.' + $json.contact_id, select: 'id', order: 'created_at.desc', limit: '1' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "id": "buscar-conversa-robo",
+      "name": "Buscar Conversa",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -704,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const conv = $json;\nconst lead = $('Code - Normalizar Leads').item.json;\nreturn {\n  json: {\n    ...lead,\n    conversation_id: conv.id\n  }\n};"
+      },
+      "id": "anexar-conversa-robo",
+      "name": "Code - Anexar Conversa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ conversation_id: 'eq.' + $json.conversation_id, direction: 'eq.inbound', and: `(created_at.gt.${$json.mensagem1_enviada_em})`, select: 'conversation_id,body,created_at', order: 'created_at.asc' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "id": "buscar-msgs-inbound-robo",
+      "name": "Buscar Msgs Inbound Pós-Envio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "position": [
+        -256,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const leads = $('Code - Anexar Conversa').all().map(i => i.json);\nconst msgs = items.map(i => i.json).filter(m => m && m.body);\nconst keywords = [\n  'automátic', 'automat', 'bot ', 'robô', 'robo ',\n  'fora do horário', 'fora de horario',\n  'não estamos disponíveis', 'nao estamos disponiveis',\n  'obrigado por entrar em contato', 'sua mensagem foi recebida',\n  'retornaremos em breve', 'em breve retornaremos',\n  'atendimento automatizado', 'atendimento via whatsapp',\n  'horário de atendimento', 'horario de atendimento',\n  'digite 1', 'pressione 1', 'opção 1', 'opcao 1',\n  // 06/11/2026: menus e assistentes virtuais (Anami, Biostévi passaram batido)\n  'assistente virtual', 'atendente virtual', 'assistente digital',\n  'selecione uma opç', 'selecione uma opc', 'escolha uma opç', 'escolha uma opc',\n  'uma das opções', 'uma das opcoes', 'agradece seu contato', 'agradece o seu contato',\n  'para agilizar seu atendimento', 'para agilizar o seu atendimento'\n];\n// IA da Meta atendendo pela empresa: conversa de verdade, em nome do dono (sem marca no payload do WAHA)\nconst sinaisIA = [\n  /verificar (a )?(agenda|disponibilidade)/, /confirmar (a )?disponibilidade/,\n  /me conta (um )?(pouco|pouquinho|mais)/, /qual (é )?a sua (ideia|proposta)/,\n  /te conhecer melhor/, /encaminhar/, /repassar/, /passar (o )?recado/, /anotad[oa]|anotei/\n];\n// uma saída por lead: agrupa as mensagens pela conversa do lead\nreturn leads.map(lead => {\n  const ms = msgs.filter(m => m.conversation_id === lead.conversation_id);\n  const textos = ms.map(m => String(m.body || '').toLowerCase()).join(' ');\n  const padraoRobo = keywords.some(k => textos.includes(k));\n  const envioTs = lead.mensagem1_enviada_em ? new Date(lead.mensagem1_enviada_em).getTime() : 0;\n  const ultraRapida = ms.some(m => {\n    const ts = m.created_at ? new Date(m.created_at).getTime() : 0;\n    return ts > 0 && envioTs > 0 && (ts - envioTs) < 8000;\n  });\n  const primeiraTs = (ms.length && ms[0].created_at) ? new Date(ms[0].created_at).getTime() : 0;\n  const atrasoSeg = (primeiraTs > 0 && envioTs > 0) ? Math.round((primeiraTs - envioTs) / 1000) : null;\n  const sinais = sinaisIA.filter(r => r.test(textos));\n  const jaSimulada = !!(((lead._custom_fields_raw || {}).wf01 || {}).ia_meta_simulada_em);\n  const iaMeta = !jaSimulada && atrasoSeg !== null && atrasoSeg <= 90 && sinais.length >= 2;\n  return { json: Object.assign({}, lead, {\n    robo_detectado: padraoRobo || ultraRapida,\n    robo_motivo: padraoRobo ? 'padrao_texto' : (ultraRapida ? 'resposta_ultra_rapida' : 'nao_detectado'),\n    robo_texto_resposta: textos.substring(0, 300),\n    robo_qtd_respostas: ms.length,\n    ia_meta_detectada: iaMeta,\n    ia_meta_atraso_seg: atrasoSeg,\n    ia_meta_motivo: 'resposta_em_' + atrasoSeg + 's_sinais_' + sinais.length\n  }) };\n});"
+      },
+      "id": "detectar-robo-v2",
+      "name": "Code - Detectar Robô",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-robo-v2",
+              "leftValue": "={{ $json.robo_detectado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-e-robo-v2",
+      "name": "IF - É Robô?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        192,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $json.lead_id }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch_body }}",
+        "options": {}
+      },
+      "id": "bloquear-lead-robo-v2",
+      "name": "Bloquear Lead Robô (CRM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: '<WAHA_SESSION>', chatId: '<TELEFONE_HAMILTON>@c.us', text: '🤖 Robô Detectado (checagem pós-envio)!\\n\\nO numero ' + ($('Code - Detectar Robô').item.json.telefone_normalizado||'') + ' (' + ($('Code - Detectar Robô').item.json.nome || $('Code - Detectar Robô').item.json.negocio || 'Lead') + ') respondeu automaticamente.\\n\\nMotivo: ' + ($('Code - Detectar Robô').item.json.robo_motivo||'') + '\\nTexto recebido: \"' + String($('Code - Detectar Robô').item.json.robo_texto_resposta||'').substring(0,150) + '\"\\n\\nLead bloqueado no CRM. Verifique se quer contato manual.' }) }}",
+        "options": {}
+      },
+      "id": "notificar-hamilton-robo-v2",
+      "name": "Notificar Hamilton - Robô (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "position": [
+        1088,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# WF01b — Detector de Robô Pós-Envio (desacoplado)\n\nResolve a limitação achada no teste de 22/09: o WF01 original só esperava 40s por auto-resposta, mas respostas reais podem levar minutos. Este fluxo roda de forma independente (a cada 5 min quando ativado) e verifica, numa janela de 1 a 30 minutos após o envio, se chegou alguma resposta automática — sem prender a execução do WF01.\n\nNasce DESATIVADO e com o trigger desabilitado, igual ao WF01. Testar manualmente antes de ativar.",
+        "height": 164,
+        "width": 1364,
+        "color": 5
+      },
+      "id": "nota-wf01b",
+      "name": "NOTA - WF01b Desacoplado",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $('Code - Detectar Robô').item.json.lead_id, select: 'id,custom_fields' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "options": {}
+      },
+      "id": "c8b2d3e4-0001-4b6c-8d2e-bbbb00000001",
+      "name": "Ler Lead Atual (CRM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "alwaysOutputData": true,
+      "position": [
+        416,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = $('Code - Detectar Robô').item.json;\nconst atual = $json || {};\n// custom_fields FRESCO do banco, para não apagar campos gravados depois do início da execução\nconst cf = (atual.custom_fields && typeof atual.custom_fields === 'object') ? atual.custom_fields : {};\nconst prev = cf.wf01 || {};\nconst NL = String.fromCharCode(10);\nconst nota = '[' + new Date().toISOString() + '] WF01b: robo detectado apos envio (checagem desacoplada). Motivo: ' + (lead.robo_motivo || '') + '. Texto recebido: ' + (lead.robo_texto_resposta || '');\nconst novo = Object.assign({}, cf, {\n  wf01: Object.assign({}, prev, {\n    status: 'robo_detectado',\n    etapa: 'aguardando_humano',\n    bloqueado: true,\n    motivo_bloqueio: 'robo_detectado_resposta_automatica',\n    observacoes: ((prev.observacoes || '') + NL + nota).trim()\n  })\n});\nreturn { json: Object.assign({}, lead, { patch_body: JSON.stringify({ custom_fields: novo }) }) };"
+      },
+      "id": "c8b2d3e4-0002-4b6c-8d2e-bbbb00000002",
+      "name": "Montar Bloqueio Robô",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        320
+      ]
+    },
+    {
+      "id": "c4234d56-b385-43b0-8e12-ab03146ae3da",
+      "name": "Limitar 1 Robô (Msg B)",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1312,
+        320
+      ],
+      "parameters": {
+        "maxItems": 1
+      }
+    },
+    {
+      "id": "b9f85cd7-52ec-482c-ab7a-332ed2af38a2",
+      "name": "Buscar Msg Enviada (CRM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        320
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ conversation_id: 'eq.' + $('Montar Bloqueio Robô').first().json.conversation_id, direction: 'eq.outbound', select: 'body,created_at,channel_session_id', order: 'created_at.asc', limit: '1' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "3df83db2-ca42-4ac4-97d9-63bd77423f07",
+      "name": "Montar Mensagem B",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const MODO = 'simulacao'; // 'simulacao' = so mostra o texto ao Hamilton | 'producao' = envia ao lead\nconst lead = $('Montar Bloqueio Robô').first().json;\nconst envio = $json || {};\nconst bloq = $('Bloquear Lead Robô (CRM)').first().json || {};\nconst cf = (bloq.custom_fields && typeof bloq.custom_fields === 'object') ? bloq.custom_fields : {};\nconst wf = cf.wf01 || {};\nconst corpo = String(envio.body || '');\nconst partes = corpo.split(/\\n\\s*\\n/);\n// formato com linha em branco: pergunta = tudo após a 1ª linha em branco\nlet pergunta = (partes.length > 1 ? partes.slice(1).join(' ') : '').replace(/\\s+/g, ' ').trim();\nif (!pergunta) {\n  // variantes de um parágrafo só (ex.: CASAMENTO_B): \"... Dúvida rápida: <pergunta>? ...\"\n  const m = corpo.replace(/\\s+/g, ' ').match(/d[úu]vida r[áa]pida:\\s*([^?]*\\?)/i);\n  if (m) pergunta = m[1].replace(/\\s*\\([^)]*\\)/g, '').trim();\n  pergunta = pergunta.charAt(0).toUpperCase() + pergunta.slice(1);\n}\nconst empresa = String(lead.nome || lead.negocio || '').trim();\nlet tel = String(lead.telefone_normalizado || '').replace(/\\D/g, '');\nif (tel && !tel.startsWith('55')) tel = '55' + tel;\nconst brt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));\nconst min = brt.getHours() * 60 + brt.getMinutes();\nconst dentroJanela = (min >= 540 && min <= 710) || (min >= 840 && min <= 1070);\nlet motivo = '';\nif (wf.robo_resposta_enviada_em) motivo = 'ja_enviada';\nelse if (!pergunta) motivo = 'sem_pergunta';\nelse if (!tel) motivo = 'sem_telefone';\nelse if (MODO === 'producao' && !dentroJanela) motivo = 'fora_da_janela';\nelse if (MODO === 'producao' && !envio.channel_session_id) motivo = 'sem_canal';\nconst saud = empresa ? 'Oi, ' + empresa + '!' : 'Oi!';\n// curta, repete a oferta original, sem apontar defeito no atendimento do lead (versão de 03/11/2026)\nconst perguntaMin = pergunta.charAt(0).toLowerCase() + pergunta.slice(1);\nconst msg_b = saud + ' Aqui é o Hamilton, da Agência OnlineAgora. Vi que minha mensagem caiu no automático 🙂 Quando alguém puder, me conta: ' + perguntaMin;\nreturn { json: { modo: MODO, pode_enviar: motivo === '', motivo_skip: motivo, msg_b, chatId: tel + '@c.us', telefone: tel, empresa, pergunta, lead_id: lead.lead_id, contact_id: lead.contact_id, conversation_id: lead.conversation_id, channel_session_id: envio.channel_session_id || null } };"
+      }
+    },
+    {
+      "id": "4fa6768f-275c-4eaa-8757-0cfb09bc74a3",
+      "name": "IF - Pode Enviar B?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1984,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-pode-enviar-b",
+              "leftValue": "={{ $json.pode_enviar }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "95d16bd3-b611-465b-9579-43f30866bb5a",
+      "name": "IF - Modo Simulação?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2208,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-modo-sim-b",
+              "leftValue": "={{ $json.modo === 'simulacao' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d84c18ce-f6b4-48c6-a6e8-3d50ec188e39",
+      "name": "Simulação - Texto B ao Hamilton (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2432,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const m = $('Montar Pendência B').first().json; return JSON.stringify({ session: '<WAHA_SESSION>', chatId: '<TELEFONE_HAMILTON>@c.us', text: '🤖 Robô respondeu: ' + (m.empresa || m.telefone) + ' (' + m.telefone + ')\\n\\nMensagem sugerida (ainda NÃO enviada):\\n\\n' + m.msg_b + '\\n\\n👉 Toque pra revisar e enviar pelo 2144:\\n' + m.link_envio + '\\n\\nO link vale 72h e só envia uma vez.' }); })() }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    },
+    {
+      "id": "5a34a1c3-4d16-4de0-9819-3c7d0e8bd911",
+      "name": "Aguardar Antes da Mensagem B",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2432,
+        460
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ 45 + Math.floor(Math.random() * 76) }}",
+        "unit": "seconds"
+      },
+      "webhookId": "c4c3168d-16fc-442d-b510-5a00e453f9f4"
+    },
+    {
+      "id": "02362f1a-e306-4b8a-8023-a5436e5bcb2e",
+      "name": "WAHA - Enviar Mensagem B",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: '<WAHA_SESSION>', chatId: $('Montar Mensagem B').first().json.chatId, text: $('Montar Mensagem B').first().json.msg_b }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    },
+    {
+      "id": "5194ca63-ee35-4a78-a38c-e229c79d8d02",
+      "name": "CRM - Inserir Mensagem B",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ organization_id: '<ORGANIZATION_ID>', conversation_id: $('Montar Mensagem B').first().json.conversation_id, channel_session_id: $('Montar Mensagem B').first().json.channel_session_id, contact_id: $('Montar Mensagem B').first().json.contact_id, type: 'text', direction: 'outbound', status: 'sent', body: $('Montar Mensagem B').first().json.msg_b, external_id: String($json.id || ($json.key && $json.key.id) || $json.messageId || ''), sent_via: 'automation' }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "478b44e3-63b5-48a0-a327-c0538c5e8a5e",
+      "name": "Montar Registro Mensagem B",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3104,
+        460
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const m = $('Montar Mensagem B').first().json;\nconst bloq = $('Bloquear Lead Robô (CRM)').first().json || {};\nconst cf = (bloq.custom_fields && typeof bloq.custom_fields === 'object') ? bloq.custom_fields : {};\nconst prev = cf.wf01 || {};\nconst NL = String.fromCharCode(10);\nconst agora = new Date().toISOString();\nconst nota = '[' + agora + '] WF01b: mensagem B enviada ao lead (resposta ao robo). Texto: ' + m.msg_b;\nconst novo = Object.assign({}, cf, { wf01: Object.assign({}, prev, { robo_resposta_enviada_em: agora, robo_resposta_texto: m.msg_b, observacoes: ((prev.observacoes || '') + NL + nota).trim() }) });\nreturn { json: { lead_id: m.lead_id, patch_body: JSON.stringify({ custom_fields: novo }) } };"
+      }
+    },
+    {
+      "id": "80659dfe-4a41-4cb3-a12a-ecc4257689a5",
+      "name": "CRM - Registrar Mensagem B no Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3328,
+        460
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $json.lead_id }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch_body }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "7c098878-1f9d-429f-a1bb-3d3918067d6c",
+      "name": "NOTA - Mensagem B",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1312,
+        60
+      ],
+      "parameters": {
+        "content": "# Mensagem B ao robô\n\nDepois de bloquear o lead e avisar o Hamilton, monta a mensagem B (empresa + pergunta que enviamos + assinatura Agência OnlineAgora).\n\n**MODO** fica no nó 'Montar Mensagem B': 'simulacao' (manda o texto só ao Hamilton) ou 'producao' (envia ao lead, dentro das janelas, 1 por execução, e registra no CRM).",
+        "height": 260,
+        "width": 520,
+        "color": 4
+      }
+    },
+    {
+      "id": "d1a7e001-0001-4a11-9c01-ia0000000001",
+      "name": "IF - IA da Meta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        416,
+        640
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-ia-meta",
+              "leftValue": "={{ $json.ia_meta_detectada }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d1a7e001-0002-4a11-9c01-ia0000000002",
+      "name": "Ler Lead Atual (IA Meta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        640
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $json.lead_id, select: 'id,custom_fields' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "d1a7e001-0003-4a11-9c01-ia0000000003",
+      "name": "Montar Marca IA Meta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        640
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = $('IF - IA da Meta?').item.json;\nconst atual = $json || {};\n// custom_fields FRESCO do banco; se a leitura falhar, usa o da execução (nunca grava um objeto vazio por cima)\nconst base = (atual.custom_fields && typeof atual.custom_fields === 'object') ? atual.custom_fields : (lead._custom_fields_raw || {});\nconst prev = base.wf01 || {};\nconst NL = String.fromCharCode(10);\nconst agora = new Date().toISOString();\nconst nota = '[' + agora + '] WF01b (SIMULACAO): possivel IA da Meta respondendo pela empresa. ' + lead.ia_meta_motivo + '. Nenhum bloqueio e nenhuma mensagem enviada ao lead.';\nconst novo = Object.assign({}, base, { wf01: Object.assign({}, prev, { ia_meta_simulada_em: agora, ia_meta_motivo: lead.ia_meta_motivo, observacoes: ((prev.observacoes || '') + NL + nota).trim() }) });\nreturn { json: Object.assign({}, lead, { patch_body: JSON.stringify({ custom_fields: novo }) }) };"
+      }
+    },
+    {
+      "id": "d1a7e001-0004-4a11-9c01-ia0000000004",
+      "name": "Gravar Marca IA Meta (CRM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1088,
+        640
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $json.lead_id }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch_body }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "d1a7e001-0005-4a11-9c01-ia0000000005",
+      "name": "Simulação - Aviso IA da Meta (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        640
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const l = $('Montar Mensagem C').item.json; const bloco = l.msg_c ? 'Mensagem C que seria enviada (ainda NÃO existe envio automático):\\n\\n' + l.msg_c : 'Sem modelo de mensagem C para esta variante (' + l.motivo_skip_c + '). Responda manualmente.'; return JSON.stringify({ session: '<WAHA_SESSION>', chatId: '<TELEFONE_HAMILTON>@c.us', text: '🧪 SIMULAÇÃO — possível IA da Meta respondendo\\n\\nLead: ' + (l.nome || l.negocio || 'Lead') + ' (' + (l.telefone_normalizado || '') + ')\\nResposta em ' + l.ia_meta_atraso_seg + ' s · ' + l.ia_meta_motivo + '\\nTexto: \"' + String(l.robo_texto_resposta || '').substring(0, 200) + '\"\\n\\n' + bloco + '\\n\\nNada foi enviado ao lead, ele não foi bloqueado nem movido de etapa.' }); })() }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    },
+    {
+      "id": "d1a7e001-0006-4a11-9c01-ia0000000006",
+      "name": "Montar Mensagem C",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        640
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const MODO = 'simulacao'; // so mostra o texto ao Hamilton; nao ha ramo de envio ao lead neste fluxo\nconst CONTATO_FONE = '<TELEFONE_HAMILTON_FORMATADO>';\nconst CONTATO_EMAIL = '<EMAIL_HAMILTON>';\nconst l = $('IF - IA da Meta?').item.json;\nconst wf = ((l._custom_fields_raw || {}).wf01) || {};\nconst variante = String(wf.variante_mensagem || '');\nconst empresa = String(l.nome || l.negocio || '').trim();\nconst saud = empresa ? 'Oi, ' + empresa + '!' : 'Oi!';\nlet msg_c = '';\nlet motivo_skip = '';\nif (/^CASAMENTO/i.test(variante)) {\n  msg_c = saud + ' Sobre a ideia que comentei: eu ajudo cerimonialistas a receber mais pedidos de orçamento de noivas pelo Instagram e WhatsApp. Não é parceria de fornecedor nem envio de portfólio. Queria 10 minutos com quem cuida de captar noivas por aí, pra mostrar como funciona. Pra retornarem, podem usar este número: ' + CONTATO_FONE + ', ou o e-mail ' + CONTATO_EMAIL + '. Hamilton, da Agência OnlineAgora.';\n} else {\n  motivo_skip = 'sem_modelo_para_variante_' + (variante || 'vazia');\n}\nreturn { json: Object.assign({}, l, { modo_c: MODO, msg_c, motivo_skip_c: motivo_skip }) };"
+      }
+    },
+    {
+      "id": "a866d7f1-c198-41c7-9afd-c747bf67d25e",
+      "name": "Montar Pendência B",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        20
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// guarda a mensagem B no lead com um token de uso unico; o link do WF01c usa esse token pra enviar pelo 2144\nconst m = $json;\nconst bloq = $('Bloquear Lead Robô (CRM)').first().json || {};\nconst cf = (bloq.custom_fields && typeof bloq.custom_fields === 'object') ? bloq.custom_fields : {};\nconst prev = cf.wf01 || {};\nlet token = '';\nwhile (token.length < 32) token += Math.random().toString(36).slice(2);\ntoken = token.slice(0, 32);\nconst pend = { token, texto: m.msg_b, chatId: m.chatId, telefone: m.telefone, empresa: m.empresa, conversation_id: m.conversation_id, channel_session_id: m.channel_session_id, contact_id: m.contact_id, criado_em: new Date().toISOString() };\nconst novo = Object.assign({}, cf, { wf01: Object.assign({}, prev, { msg_b_pendente: pend }) });\nconst link = 'https://webhook.hamiltonviana.com.br/webhook/wf01b-enviar-b?lead=' + m.lead_id + '&t=' + token;\nreturn { json: Object.assign({}, m, { link_envio: link, patch_body: JSON.stringify({ custom_fields: novo }) }) };"
+      }
+    },
+    {
+      "id": "42450a8d-11d7-4693-9ea2-c6651150693d",
+      "name": "CRM - Gravar Pendência B",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        20
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $json.lead_id }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch_body }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Verificação - Schedule": {
+      "main": [
+        [
+          {
+            "node": "Buscar Leads Aguardando Verificação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Leads Aguardando Verificação": {
+      "main": [
+        [
+          {
+            "node": "Code - Normalizar Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Normalizar Leads": {
+      "main": [
+        [
+          {
+            "node": "Limitar Lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limitar Lote": {
+      "main": [
+        [
+          {
+            "node": "Buscar Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Conversa": {
+      "main": [
+        [
+          {
+            "node": "Code - Anexar Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Anexar Conversa": {
+      "main": [
+        [
+          {
+            "node": "Buscar Msgs Inbound Pós-Envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Msgs Inbound Pós-Envio": {
+      "main": [
+        [
+          {
+            "node": "Code - Detectar Robô",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Detectar Robô": {
+      "main": [
+        [
+          {
+            "node": "IF - É Robô?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - É Robô?": {
+      "main": [
+        [
+          {
+            "node": "Ler Lead Atual (CRM)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF - IA da Meta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bloquear Lead Robô (CRM)": {
+      "main": [
+        [
+          {
+            "node": "Notificar Hamilton - Robô (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Lead Atual (CRM)": {
+      "main": [
+        [
+          {
+            "node": "Montar Bloqueio Robô",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Bloqueio Robô": {
+      "main": [
+        [
+          {
+            "node": "Bloquear Lead Robô (CRM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar Hamilton - Robô (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Limitar 1 Robô (Msg B)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limitar 1 Robô (Msg B)": {
+      "main": [
+        [
+          {
+            "node": "Buscar Msg Enviada (CRM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Msg Enviada (CRM)": {
+      "main": [
+        [
+          {
+            "node": "Montar Mensagem B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Mensagem B": {
+      "main": [
+        [
+          {
+            "node": "IF - Pode Enviar B?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Pode Enviar B?": {
+      "main": [
+        [
+          {
+            "node": "IF - Modo Simulação?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Modo Simulação?": {
+      "main": [
+        [
+          {
+            "node": "Montar Pendência B",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aguardar Antes da Mensagem B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar Antes da Mensagem B": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Enviar Mensagem B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAHA - Enviar Mensagem B": {
+      "main": [
+        [
+          {
+            "node": "CRM - Inserir Mensagem B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Inserir Mensagem B": {
+      "main": [
+        [
+          {
+            "node": "Montar Registro Mensagem B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Registro Mensagem B": {
+      "main": [
+        [
+          {
+            "node": "CRM - Registrar Mensagem B no Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - IA da Meta?": {
+      "main": [
+        [
+          {
+            "node": "Ler Lead Atual (IA Meta)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Lead Atual (IA Meta)": {
+      "main": [
+        [
+          {
+            "node": "Montar Marca IA Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Marca IA Meta": {
+      "main": [
+        [
+          {
+            "node": "Gravar Marca IA Meta (CRM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar Marca IA Meta (CRM)": {
+      "main": [
+        [
+          {
+            "node": "Montar Mensagem C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Mensagem C": {
+      "main": [
+        [
+          {
+            "node": "Simulação - Aviso IA da Meta (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Pendência B": {
+      "main": [
+        [
+          {
+            "node": "CRM - Gravar Pendência B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Gravar Pendência B": {
+      "main": [
+        [
+          {
+            "node": "Simulação - Texto B ao Hamilton (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "exportado_em": "2026-11-11",
+    "n8n_workflow_id": "izN7M73xkEIIWFXJ",
+    "versao_ativa": "7c87758f-ae21-47f1-a0dd-5f9532f75fb2"
+  }
+}

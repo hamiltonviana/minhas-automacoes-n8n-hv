@@ -1,0 +1,467 @@
+{
+  "name": "Máquina_Clientes_WF01c_Enviar_Mensagem_B_por_Link_by_Claude_code_v1",
+  "nodes": [
+    {
+      "id": "02d98248-9c27-4da6-a7f4-999586623f4e",
+      "name": "Abrir Link (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "wf01b-enviar-b",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "1e730282-cfb4-4d3c-81a3-fcf45d62d0ed"
+    },
+    {
+      "id": "a5fa5722-8e78-4666-916f-ab59e2766f19",
+      "name": "Ler Lead (GET)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + String($('Abrir Link (GET)').first().json.query.lead || '').replace(/[^0-9a-f-]/gi, ''), select: 'id,contact_id,custom_fields' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "ef0b0534-6d0a-4af3-898f-5593962345d6",
+      "name": "Montar Página de Confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;'); }\nfunction pagina(titulo, corpo) {\n  return '<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>' + esc(titulo) + '</title>'\n    + '<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:24px auto;padding:0 16px;color:#1f2a2e;background:#f7f5f0}'\n    + '.box{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px;white-space:pre-wrap;line-height:1.5}'\n    + 'button{width:100%;margin-top:16px;padding:14px;font-size:17px;border:0;border-radius:10px;background:#1f6f5c;color:#fff}'\n    + 'p.m{color:#666;font-size:14px}</style></head><body><h2>' + esc(titulo) + '</h2>' + corpo + '</body></html>';\n}\nfunction validar(lead, token) {\n  const wf = ((lead && lead.custom_fields) || {}).wf01 || {};\n  const p = wf.msg_b_pendente || null;\n  if (!lead || !lead.id) return { ok: false, motivo: 'Lead não encontrado.' };\n  if (!p || !p.token || p.token !== token) return { ok: false, motivo: 'Link inválido ou já substituído.' };\n  if (wf.robo_resposta_enviada_em) return { ok: false, motivo: 'Essa mensagem já foi enviada em ' + new Date(wf.robo_resposta_enviada_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '.' };\n  if (p.criado_em && (Date.now() - new Date(p.criado_em).getTime()) > 72 * 3600 * 1000) return { ok: false, motivo: 'Link vencido (mais de 72 horas).' };\n  return { ok: true, p };\n}\nconst q = $('Abrir Link (GET)').first().json.query || {};\nconst lead = $input.first().json;\nconst v = validar(lead, String(q.t || ''));\nlet html;\nif (!v.ok) {\n  html = pagina('Não dá pra enviar', '<p>' + esc(v.motivo) + '</p>');\n} else {\n  html = pagina('Enviar pelo 2144?', '<p class=\"m\">Para: ' + esc(v.p.empresa || v.p.telefone) + '</p><div class=\"box\">' + esc(v.p.texto) + '</div>'\n    + '<form method=\"POST\"><input type=\"hidden\" name=\"lead\" value=\"' + esc(lead.id) + '\"><input type=\"hidden\" name=\"t\" value=\"' + esc(q.t) + '\">'\n    + '<button type=\"submit\">Enviar mensagem</button></form>'\n    + '<p class=\"m\">Sai pelo mesmo número do primeiro contato e fica registrada no CRM.</p>');\n}\nreturn [{ json: { html } }];"
+      }
+    },
+    {
+      "id": "7919a506-9843-4aea-b592-9b4216f6e318",
+      "name": "Responder Página",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "e754b516-cdbe-401f-bbff-b637f1f5a34e",
+      "name": "Confirmar Envio (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf01b-enviar-b",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "62d33cd2-2581-4fca-a622-91d6d718b6a3"
+    },
+    {
+      "id": "c3377715-5421-4bf8-815a-7aaddf50f1ea",
+      "name": "Ler Lead (POST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        300
+      ],
+      "parameters": {
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + String($('Confirmar Envio (POST)').first().json.body.lead || '').replace(/[^0-9a-f-]/gi, ''), select: 'id,contact_id,custom_fields' }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\"}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "34ec5fd7-bffd-4f26-a5da-1ce4e0a38e1d",
+      "name": "Validar Envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        300
+      ],
+      "parameters": {
+        "jsCode": "function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;'); }\nfunction pagina(titulo, corpo) {\n  return '<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>' + esc(titulo) + '</title>'\n    + '<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:24px auto;padding:0 16px;color:#1f2a2e;background:#f7f5f0}'\n    + '.box{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px;white-space:pre-wrap;line-height:1.5}'\n    + 'p.m{color:#666;font-size:14px}</style></head><body><h2>' + esc(titulo) + '</h2>' + corpo + '</body></html>';\n}\nfunction validar(lead, token) {\n  const wf = ((lead && lead.custom_fields) || {}).wf01 || {};\n  const p = wf.msg_b_pendente || null;\n  if (!lead || !lead.id) return { ok: false, motivo: 'Lead não encontrado.' };\n  if (!p || !p.token || p.token !== token) return { ok: false, motivo: 'Link inválido ou já substituído.' };\n  if (wf.robo_resposta_enviada_em) return { ok: false, motivo: 'Essa mensagem já foi enviada em ' + new Date(wf.robo_resposta_enviada_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '.' };\n  if (p.criado_em && (Date.now() - new Date(p.criado_em).getTime()) > 72 * 3600 * 1000) return { ok: false, motivo: 'Link vencido (mais de 72 horas).' };\n  return { ok: true, p };\n}\nconst b = $('Confirmar Envio (POST)').first().json.body || {};\nconst lead = $input.first().json;\nconst v = validar(lead, String(b.t || ''));\nif (!v.ok) return [{ json: { ok: false, html: pagina('Não enviado', '<p>' + esc(v.motivo) + '</p>') } }];\nreturn [{ json: { ok: true, lead_id: lead.id, custom_fields: lead.custom_fields || {}, p: v.p } }];"
+      }
+    },
+    {
+      "id": "136774f5-5cdd-4e19-b7c0-3f293bfddfd8",
+      "name": "IF - Pode Enviar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "f6d9c158-904b-4cd2-a09a-126dc0ac5810",
+      "name": "WAHA - Enviar Mensagem B (2144)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://waha:3000/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: '<WAHA_SESSION>', chatId: $json.p.chatId, text: $json.p.texto }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "278bJV2LnxY8OmdN",
+          "name": "WAHA CRM OAMG - API Key"
+        }
+      }
+    },
+    {
+      "id": "7d53dfb2-83cb-4386-a373-e6c492689b5b",
+      "name": "CRM - Inserir Mensagem B",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const p = $('Validar Envio').first().json.p; return JSON.stringify({ organization_id: '<ORGANIZATION_ID>', conversation_id: p.conversation_id, channel_session_id: p.channel_session_id, contact_id: p.contact_id, type: 'text', direction: 'outbound', status: 'sent', body: p.texto, external_id: String($json.id || ($json.key && $json.key.id) || $json.messageId || ''), sent_via: 'automation' }); })() }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "0b82da6b-c3b3-4e59-8d66-614415624fcf",
+      "name": "Montar Registro Envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        200
+      ],
+      "parameters": {
+        "jsCode": "function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;'); }\nconst NL = String.fromCharCode(10);\nconst v = $('Validar Envio').first().json;\nconst cf = v.custom_fields || {};\nconst prev = cf.wf01 || {};\nconst agora = new Date().toISOString();\nconst nota = '[' + agora + '] WF01c: mensagem B enviada pelo link de confirmacao (Hamilton). Texto: ' + v.p.texto;\nconst wf01 = Object.assign({}, prev, { robo_resposta_enviada_em: agora, robo_resposta_texto: v.p.texto, observacoes: ((prev.observacoes || '') + NL + nota).trim() });\ndelete wf01.msg_b_pendente;\nconst html = '<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Enviada</title>'\n  + '<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:24px auto;padding:0 16px;color:#1f2a2e;background:#f7f5f0}.box{background:#fff;border:1px solid #ddd;border-radius:12px;padding:16px;white-space:pre-wrap;line-height:1.5}p.m{color:#666;font-size:14px}</style></head><body>'\n  + '<h2>Mensagem enviada ✅</h2><div class=\"box\">' + esc(v.p.texto) + '</div><p class=\"m\">Enviada pelo 2144 para ' + esc(v.p.empresa || v.p.telefone) + ' e registrada no CRM.</p></body></html>';\nreturn [{ json: { lead_id: v.lead_id, patch_body: JSON.stringify({ custom_fields: Object.assign({}, cf, { wf01 }) }), html } }];"
+      }
+    },
+    {
+      "id": "366ecd48-37a0-4b82-b277-fbcc89a68133",
+      "name": "CRM - Registrar Envio no Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        200
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://<SUPABASE_PROJECT_REF>.supabase.co/rest/v1/crm_leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({ id: 'eq.' + $json.lead_id }) }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\"apikey\": \"<SUPABASE_ANON_KEY>\", \"Content-Type\": \"application/json\", \"Prefer\": \"return=representation\"}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch_body }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hLo1AcqYC7KJlPzN",
+          "name": "Supabase CRM OAMG - Service Role (Authorization)"
+        }
+      }
+    },
+    {
+      "id": "e0443189-56ff-4854-9f99-d2cd235f9e31",
+      "name": "Responder Enviado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $('Montar Registro Envio').first().json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a1e085b9-8d5a-4340-8d36-da1db65fba32",
+      "name": "Responder Não Enviado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        420
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Abrir Link (GET)": {
+      "main": [
+        [
+          {
+            "node": "Ler Lead (GET)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Lead (GET)": {
+      "main": [
+        [
+          {
+            "node": "Montar Página de Confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Página de Confirmação": {
+      "main": [
+        [
+          {
+            "node": "Responder Página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar Envio (POST)": {
+      "main": [
+        [
+          {
+            "node": "Ler Lead (POST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Lead (POST)": {
+      "main": [
+        [
+          {
+            "node": "Validar Envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Envio": {
+      "main": [
+        [
+          {
+            "node": "IF - Pode Enviar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Pode Enviar?": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Enviar Mensagem B (2144)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder Não Enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAHA - Enviar Mensagem B (2144)": {
+      "main": [
+        [
+          {
+            "node": "CRM - Inserir Mensagem B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Inserir Mensagem B": {
+      "main": [
+        [
+          {
+            "node": "Montar Registro Envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Registro Envio": {
+      "main": [
+        [
+          {
+            "node": "CRM - Registrar Envio no Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM - Registrar Envio no Lead": {
+      "main": [
+        [
+          {
+            "node": "Responder Enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "exportado_em": "2026-11-11",
+    "n8n_workflow_id": "e97cyxeOKVEH4rCX",
+    "versao_ativa": "43bb7e93-fa58-4513-8e8d-b55ba875b034"
+  }
+}
