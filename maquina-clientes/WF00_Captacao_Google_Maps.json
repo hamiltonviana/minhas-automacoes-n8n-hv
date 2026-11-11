@@ -214,7 +214,7 @@
         "url": "={{ 'https://places.googleapis.com/v1/places/' + $json.place_id }}",
         "sendHeaders": true,
         "specifyHeaders": "json",
-        "jsonHeaders": "{\n  \"X-Goog-FieldMask\": \"id,displayName,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,userRatingCount,rating\"\n}",
+        "jsonHeaders": "{\n  \"X-Goog-FieldMask\": \"id,displayName,formattedAddress,nationalPhoneNumber,internationalPhoneNumber,userRatingCount,rating,regularOpeningHours,utcOffsetMinutes\"\n}",
         "options": {},
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
@@ -288,7 +288,7 @@
       ],
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const details = $json || {};\nconst telIntl = details.internationalPhoneNumber || '';\nconst telLocal = details.nationalPhoneNumber || '';\nconst telefone = telIntl || telLocal;\nconst telefoneNormalizado = String(telefone || '').replace(/\\D/g, '');\n\nconst avaliacoes = (details.userRatingCount !== undefined && details.userRatingCount !== null)\n  ? Number(details.userRatingCount)\n  : 0;\n\nconst nota = (details.rating !== undefined && details.rating !== null)\n  ? Number(details.rating)\n  : '';\n\nreturn {\n  json: {\n    ...$json,\n    telefone,\n    telefone_normalizado: telefoneNormalizado,\n    observacoes: details.formattedAddress || $json.observacoes || '',\n    AVALIACOES_GMN: avaliacoes,\n    NOTA_GMN: nota\n  }\n};"
+        "jsCode": "const details = $json || {};\nconst telIntl = details.internationalPhoneNumber || '';\nconst telLocal = details.nationalPhoneNumber || '';\nconst telefone = telIntl || telLocal;\nconst telefoneNormalizado = String(telefone || '').replace(/\\D/g, '');\n\nconst avaliacoes = (details.userRatingCount !== undefined && details.userRatingCount !== null)\n  ? Number(details.userRatingCount)\n  : 0;\n\nconst nota = (details.rating !== undefined && details.rating !== null)\n  ? Number(details.rating)\n  : '';\n\n// horario de funcionamento do GMN, no mesmo formato que o WF01 le em contacts.source_metadata.horario_gmn\nconst roh = details.regularOpeningHours || null;\nconst horarioGmn = (roh && Array.isArray(roh.periods) && roh.periods.length)\n  ? { periods: roh.periods, descricao: roh.weekdayDescriptions || [], utc_offset_min: details.utcOffsetMinutes ?? null, fonte: 'places_v1', buscado_em: new Date().toISOString() }\n  : null;\n\nreturn {\n  json: {\n    ...$json,\n    telefone,\n    telefone_normalizado: telefoneNormalizado,\n    observacoes: details.formattedAddress || $json.observacoes || '',\n    AVALIACOES_GMN: avaliacoes,\n    NOTA_GMN: nota,\n    horario_gmn: horarioGmn\n  }\n};"
       }
     },
     {
@@ -452,7 +452,7 @@
         832
       ],
       "parameters": {
-        "jsCode": "const ORG_ID = '<ORGANIZATION_ID>';\nreturn items.map(item => {\n  const j = item.json;\n  const meta = { origem: 'google_maps' };\n  if (j.place_id) meta.place_id = j.place_id;\n  if (j.google_maps_url) meta.google_maps_url = j.google_maps_url;\n  if (j.AVALIACOES_GMN) meta.avaliacoes_gmn = Number(j.AVALIACOES_GMN);\n  if (j.NOTA_GMN !== '' && j.NOTA_GMN !== null && j.NOTA_GMN !== undefined) meta.nota_gmn = Number(j.NOTA_GMN);\n  if (j.cidade) meta.cidade = j.cidade;\n  if (j.nicho) meta.nicho = j.nicho;\n  if (j.instagram && j.instagram !== 'Perfil_não_encontrado') meta.instagram = j.instagram;\n\n  const body = {\n    organization_id: ORG_ID,\n    name: j.nome || '',\n    phone_number: j.telefone_normalizado ? ('+' + j.telefone_normalizado) : null,\n    source: 'prospeccao_gmn',\n    source_metadata: meta,\n    tags: j.nicho ? [j.nicho] : []\n  };\n  return { json: { ...j, _body: JSON.stringify(body) } };\n});"
+        "jsCode": "const ORG_ID = '<ORGANIZATION_ID>';\nreturn items.map(item => {\n  const j = item.json;\n  const meta = { origem: 'google_maps' };\n  if (j.place_id) meta.place_id = j.place_id;\n  if (j.google_maps_url) meta.google_maps_url = j.google_maps_url;\n  if (j.AVALIACOES_GMN) meta.avaliacoes_gmn = Number(j.AVALIACOES_GMN);\n  if (j.NOTA_GMN !== '' && j.NOTA_GMN !== null && j.NOTA_GMN !== undefined) meta.nota_gmn = Number(j.NOTA_GMN);\n  if (j.cidade) meta.cidade = j.cidade;\n  if (j.nicho) meta.nicho = j.nicho;\n  if (j.instagram && j.instagram !== 'Perfil_não_encontrado') meta.instagram = j.instagram;\n  // horario do GMN: o WF01 usa para so disparar com a loja aberta (pizzaria/hamburgueria fecham de dia)\n  if (j.horario_gmn && Array.isArray(j.horario_gmn.periods) && j.horario_gmn.periods.length) meta.horario_gmn = j.horario_gmn;\n\n  const body = {\n    organization_id: ORG_ID,\n    name: j.nome || '',\n    phone_number: j.telefone_normalizado ? ('+' + j.telefone_normalizado) : null,\n    source: 'prospeccao_gmn',\n    source_metadata: meta,\n    tags: j.nicho ? [j.nicho] : []\n  };\n  return { json: { ...j, _body: JSON.stringify(body) } };\n});"
       }
     },
     {
@@ -970,6 +970,6 @@
   "meta": {
     "exportado_em": "2026-11-11",
     "n8n_workflow_id": "8VDPo3rv6VZOFkuf",
-    "versao_ativa": "c68e0801-da8c-4823-9438-09e4558ab8d3"
+    "versao_ativa": "51b4e618-7f71-4ec6-8d4d-96eebca9530e"
   }
 }

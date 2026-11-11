@@ -14,7 +14,7 @@ WF01c Resumo Diário: todo dia às 18h30, números do dia no WhatsApp do Hamilto
 
 | Arquivo | O que faz | Quando roda |
 |---|---|---|
-| `WF00_Captacao_Google_Maps.json` | Formulário (nicho + cidade) → Google Places → telefone, avaliações e Instagram → salva contato e lead em "Captado" no CRM. Não repete nicho+cidade já prospectado (a menos que "forçar busca"). | Sob demanda (formulário) |
+| `WF00_Captacao_Google_Maps.json` | Formulário (nicho + cidade) → Google Places → telefone, avaliações e Instagram → salva contato (com o horário de funcionamento do GMN em `source_metadata.horario_gmn`, usado pelo WF01) e lead em "Captado" no CRM. Não repete nicho+cidade já prospectado (a menos que "forçar busca"). | Sob demanda (formulário) |
 | `WF01_Disparo.json` | Envia a mensagem 1 (pergunta de abertura) para os leads da fila. Tem travas anti-duplicidade, respeita o horário de funcionamento do Google Meu Negócio e só manda dentro das janelas de envio. | Agendado, dias úteis |
 | `WF01b_Detectar_Robo.json` | De 1 a 30 min depois do envio, lê as respostas. Se for robô/menu/assistente virtual (lista de palavras ou resposta em menos de 8 s), bloqueia o lead e prepara a **Mensagem B**. Também marca possível **IA da Meta** (resposta em até 90 s com 2+ sinais). | A cada 5 min, 9h–19h, seg–sex |
 | `WF01c_Enviar_Mensagem_B_por_Link.json` | Link de uso único (vale 72 h) que o Hamilton recebe no WhatsApp: abre a Mensagem B, revisa e envia pelo 2144. Registra no CRM. | Webhook (GET mostra, POST envia) |
